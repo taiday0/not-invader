@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<title>not インベーダー</title>
+<style>
+  body {
+    background: #000;
+    color: #0f0;
+    font-family: monospace;
+    text-align: center;
+    margin: 0;
+    overflow: hidden;
+  }
+
+  canvas {
+    width: 100vw;
+    height: 70vh;
+    background: #000;
+    border: 1px solid #0f0;
+    display: block;
+    margin: 0 auto;
+  }
+
+  /* モバイル用ボタン（初期は非表示） */
+  #pad {
+    display: none;
+    position: fixed;
+    bottom: 10px;
+    width: 100%;
+    display: flex;
+    justify-content: space-around;
+    z-index: 10;
+  }
+
+  #pad button {
+    width: 22vw;
+    height: 22vw;
+    font-size: 8vw;
+    background: #222;
+    color: #0f0;
+    border: 2px solid #0f0;
+    border-radius: 10px;
+  }
+</style>
+</head>
+<body>
+
+<h1>not インベーダー</h1>
+<p>PC: ← → / Space　スマホ: ボタン操作</p>
+
+<canvas id="game"></canvas>
+
+<!-- モバイル用ボタン -->
+<div id="pad">
+  <button id="left">←</button>
+  <button id="shoot">●</button>
+  <button id="right">→</button>
+</div>
+
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+
+function resizeCanvas() {
+  canvas.width = canvas.clientWidth;
+  canvas.height = canvas.clientHeight;
+}
+window.addEventListener("resize", resizeCanvas);
+resizeCanvas();
+
+/* 効果音 */
+const seShoot = new Audio("sounds/shoot.mp3");
+const seHit = new Audio("sounds/hit.mp3");
+const seGameOver = new Audio("sounds/gameover.mp3");
+const seClear = new Audio("sounds/clear.mp3");
+
+seShoot.preload = "auto";
+seHit.preload = "auto";
+seGameOver.preload = "auto";
+seClear.preload = "auto";
+
+/* モバイル判定 */
+function isMobile() {
+  return /Android|iPhone|iPad|iPod|Windows Phone/i.test(navigator.userAgent);
+}
+if (isMobile()) {
+  document.getElementById("pad").style.display = "flex";
+}
+
+const player = {
+  x: canvas.width / 2 - 15,
+  y: canvas.height - 40,
+  w: 30,
+  h: 10,
+  speed: 4
+};
+
+const bullets = [];
+const enemies = [];
+const enemyRows = 3;
+const enemyCols = 8;
+const enemySpacingX = 40;
+const enemySpacingY = 30;
+const enemyOffsetX = 40;
+const enemyOffsetY = 40;
+let enemyDir = 1;
+let gameOver = false;
+let score = 0;
+
+/* キー入力 */
+const keys = {};
+document.addEventListener("keydown", e => {
+  keys[e.key] = true;
+  if (e.key === " " || e.key === "Spacebar") shoot();
+});
+document.addEventListener("keyup", e => keys[e.key] = false);
+
+/* タッチ操作（スライド移動） */
+canvas.addEventListener("touchmove", e => {
+  const touch = e.touches[0];
+  const rect = canvas.getBoundingClientRect();
+  const x = touch.clientX - rect.left;
+  player.x = x - player.w / 2;
+});
+
+/* タッチでショット */
+canvas.addEventListener("touchstart", () => shoot());
+
+/* モバイルボタン操作 */
+document.getElementById("left").ontouchstart = () => keys["ArrowLeft"] = true;
+document.getElementById("left").ontouchend = () => keys["ArrowLeft"] = false;
+
+document.getElementById("right").ontouchstart = () => keys["ArrowRight"] = true;
+document.getElementById("right").ontouchend = () => keys["ArrowRight"] = false;
+
+document.getElementById("shoot").ontouchstart = () => shoot();
+
+/* 敵生成 */
+function initEnemies() {
+  enemies.length = 0;
+  for (let r = 0; r < enemyRows; r++) {
+    for (let c = 0; c < enemyCols; c++) {
+      enemies.push({
+        x: enemyOffsetX + c * enemySpacingX,
+        y: enemyOffsetY + r * enemySpacingY,
+        w: 20,
+        h: 15,
+        alive: true
+      });
+    }
+  }
+}
+
+/* ショット */
+function shoot() {
+  seShoot.currentTime = 0;
+  seShoot.play();
+
+  bullets.push({
+    x: player.x + player.w / 2 - 2,
+    y: player.y,
+    w: 4,
+    h: 10,
+    speed: 6
+  });
+}
+
+/* プレイヤー更新 */
+function updatePlayer() {
+  if (keys["ArrowLeft"]) player.x -= player.speed;
+  if (keys["ArrowRight"]) player.x += player.speed;
+
+  if (player.x < 0) player.x = 0;
+  if (player.x + player.w > canvas.width) player.x = canvas.width - player.w;
+}
+
+/* 弾更新 */
+function updateBullets() {
+  for (let i = bullets.length - 1; i >= 0; i--) {
+    bullets[i].y -= bullets[i].speed;
+    if (bullets[i].y + bullets[i].h < 0) bullets.splice(i, 1);
+  }
+}
+
+/* 敵更新 */
+function updateEnemies() {
+  let moveDown = false;
+
+  for (const e of enemies) {
+    if (!e.alive) continue;
+    if (enemyDir === 1 && e.x + e.w >= canvas.width - 10) {
+      moveDown = true;
+      break;
+    }
+    if (enemyDir === -1 && e.x <= 10) {
+      moveDown = true;
+      break;
+    }
+  }
+
+  for (const e of enemies) {
+    if (!e.alive) continue;
+    if (moveDown) {
+      e.y += 10;
+    } else {
+      e.x += enemyDir * 1.5;
+    }
+
+    if (e.y + e.h >= player.y) {
+      if (!gameOver) {
+        seGameOver.currentTime = 0;
+        seGameOver.play();
+      }
+      gameOver = true;
+    }
+  }
+
+  if (moveDown) enemyDir *= -1;
+}
+
+/* 当たり判定 */
+function checkCollisions() {
+  for (let i = bullets.length - 1; i >= 0; i--) {
+    const b = bullets[i];
+    for (const e of enemies) {
+      if (!e.alive) continue;
+      if (
+        b.x < e.x + e.w &&
+        b.x + b.w > e.x &&
+        b.y < e.y + e.h &&
+        b.y + b.h > e.y
+      ) {
+        e.alive = false;
+        bullets.splice(i, 1);
+        score += 10;
+
+        seHit.currentTime = 0;
+        seHit.play();
+        break;
+      }
+    }
+  }
+
+  /* 全敵撃破 → クリア音 */
+  if (enemies.every(e => !e.alive) && !gameOver) {
+    seClear.currentTime = 0;
+    seClear.play();
+  }
+}
+
+/* 描画 */
+function drawPlayer() {
+  ctx.fillStyle = "#0f0";
+  ctx.fillRect(player.x, player.y, player.w, player.h);
+}
+
+function drawBullets() {
+  ctx.fillStyle = "#ff0";
+  for (const b of bullets) ctx.fillRect(b.x, b.y, b.w, b.h);
+}
+
+function drawEnemies() {
+  ctx.fillStyle = "#f00";
+  for (const e of enemies) if (e.alive) ctx.fillRect(e.x, e.y, e.w, e.h);
+}
+
+function drawHUD() {
+  ctx.fillStyle = "#0f0";
+  ctx.font = "14px monospace";
+  ctx.fillText("SCORE: " + score, 10, 20);
+
+  if (gameOver) {
+    ctx.fillStyle = "#f00";
+    ctx.font = "24px monospace";
+    ctx.fillText("GAME OVER", canvas.width / 2 - 70, canvas.height / 2);
+  }
+}
+
+/* メインループ */
+function gameLoop() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  if (!gameOver) {
+    updatePlayer();
+    updateBullets();
+    updateEnemies();
+    checkCollisions();
+  }
+
+  drawPlayer();
+  drawBullets();
+  drawEnemies();
+  drawHUD();
+
+  requestAnimationFrame(gameLoop);
+}
+
+initEnemies();
+gameLoop();
+</script>
+
+</body>
+</html>
