@@ -21,42 +21,14 @@
     display: block;
     margin: 0 auto;
   }
-
-  /* モバイル用ボタン（初期は非表示） */
-  #pad {
-    display: none;
-    position: fixed;
-    bottom: 10px;
-    width: 100%;
-    display: flex;
-    justify-content: space-around;
-    z-index: 10;
-  }
-
-  #pad button {
-    width: 22vw;
-    height: 22vw;
-    font-size: 8vw;
-    background: #222;
-    color: #0f0;
-    border: 2px solid #0f0;
-    border-radius: 10px;
-  }
 </style>
 </head>
 <body>
 
 <h1>not インベーダー</h1>
-<p>PC: ← → / Space　スマホ: ボタン操作</p>
+<p>PC: ← → / Space　スマホ: スライド移動＋タップでショット</p>
 
 <canvas id="game"></canvas>
-
-<!-- モバイル用ボタン -->
-<div id="pad">
-  <button id="left">←</button>
-  <button id="shoot">●</button>
-  <button id="right">→</button>
-</div>
 
 <script>
 const canvas = document.getElementById("game");
@@ -84,9 +56,6 @@ seClear.preload = "auto";
 function isMobile() {
   return /Android|iPhone|iPad|iPod|Windows Phone/i.test(navigator.userAgent);
 }
-if (isMobile()) {
-  document.getElementById("pad").style.display = "flex";
-}
 
 const player = {
   x: canvas.width / 2 - 15,
@@ -96,7 +65,10 @@ const player = {
   speed: 4
 };
 
+let life = 3; // ★残機3
+
 const bullets = [];
+const enemyBullets = []; // ★敵弾
 const enemies = [];
 const enemyRows = 3;
 const enemyCols = 8;
@@ -116,7 +88,7 @@ document.addEventListener("keydown", e => {
 });
 document.addEventListener("keyup", e => keys[e.key] = false);
 
-/* タッチ操作（スライド移動） */
+/* スマホ操作（スライド移動） */
 canvas.addEventListener("touchmove", e => {
   const touch = e.touches[0];
   const rect = canvas.getBoundingClientRect();
@@ -124,17 +96,8 @@ canvas.addEventListener("touchmove", e => {
   player.x = x - player.w / 2;
 });
 
-/* タッチでショット */
+/* スマホタップでショット */
 canvas.addEventListener("touchstart", () => shoot());
-
-/* モバイルボタン操作 */
-document.getElementById("left").ontouchstart = () => keys["ArrowLeft"] = true;
-document.getElementById("left").ontouchend = () => keys["ArrowLeft"] = false;
-
-document.getElementById("right").ontouchstart = () => keys["ArrowRight"] = true;
-document.getElementById("right").ontouchend = () => keys["ArrowRight"] = false;
-
-document.getElementById("shoot").ontouchstart = () => shoot();
 
 /* 敵生成 */
 function initEnemies() {
@@ -217,10 +180,36 @@ function updateEnemies() {
   }
 
   if (moveDown) enemyDir *= -1;
+
+  /* ★敵の攻撃（ランダム） */
+  if (Math.random() < 0.03) {
+    const shooter = enemies.find(e => e.alive);
+    if (shooter) {
+      enemyBullets.push({
+        x: shooter.x + shooter.w / 2 - 2,
+        y: shooter.y + shooter.h,
+        w: 4,
+        h: 10,
+        speed: 3
+      });
+    }
+  }
+}
+
+/* 敵弾更新 */
+function updateEnemyBullets() {
+  for (let i = enemyBullets.length - 1; i >= 0; i--) {
+    enemyBullets[i].y += enemyBullets[i].speed;
+
+    if (enemyBullets[i].y > canvas.height) {
+      enemyBullets.splice(i, 1);
+    }
+  }
 }
 
 /* 当たり判定 */
 function checkCollisions() {
+  /* 自弾 vs 敵 */
   for (let i = bullets.length - 1; i >= 0; i--) {
     const b = bullets[i];
     for (const e of enemies) {
@@ -242,10 +231,35 @@ function checkCollisions() {
     }
   }
 
-  /* 全敵撃破 → クリア音 */
-  if (enemies.every(e => !e.alive) && !gameOver) {
+  /* ★敵弾 vs プレイヤー（残機制） */
+  for (let i = enemyBullets.length - 1; i >= 0; i--) {
+    const b = enemyBullets[i];
+    if (
+      b.x < player.x + player.w &&
+      b.x + b.w > player.x &&
+      b.y < player.y + player.h &&
+      b.y + b.h > player.y
+    ) {
+      enemyBullets.splice(i, 1);
+
+      seHit.currentTime = 0;
+      seHit.play();
+
+      life--;
+
+      if (life <= 0) {
+        seGameOver.currentTime = 0;
+        seGameOver.play();
+        gameOver = true;
+      }
+    }
+  }
+
+  /* ★全敵撃破 → クリア音 */
+  if (!gameOver && enemies.every(e => !e.alive)) {
     seClear.currentTime = 0;
     seClear.play();
+    gameOver = true;
   }
 }
 
@@ -260,6 +274,11 @@ function drawBullets() {
   for (const b of bullets) ctx.fillRect(b.x, b.y, b.w, b.h);
 }
 
+function drawEnemyBullets() {
+  ctx.fillStyle = "#0ff";
+  for (const b of enemyBullets) ctx.fillRect(b.x, b.y, b.w, b.h);
+}
+
 function drawEnemies() {
   ctx.fillStyle = "#f00";
   for (const e of enemies) if (e.alive) ctx.fillRect(e.x, e.y, e.w, e.h);
@@ -269,6 +288,7 @@ function drawHUD() {
   ctx.fillStyle = "#0f0";
   ctx.font = "14px monospace";
   ctx.fillText("SCORE: " + score, 10, 20);
+  ctx.fillText("LIFE: " + life, 10, 40);
 
   if (gameOver) {
     ctx.fillStyle = "#f00";
@@ -285,11 +305,13 @@ function gameLoop() {
     updatePlayer();
     updateBullets();
     updateEnemies();
+    updateEnemyBullets();
     checkCollisions();
   }
 
   drawPlayer();
   drawBullets();
+  drawEnemyBullets();
   drawEnemies();
   drawHUD();
 
